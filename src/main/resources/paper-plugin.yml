@@ -1,0 +1,8 @@
+name: JadeBridge
+version: '${version}'
+main: com.darkspirit69.jadebridge.JadeBridge
+api-version: '26.3'
+description: Server-side support for the Jade client mod on Paper servers.
+authors: [DarkSpirit69]
+website: https://github.com/DarkSpirit69/JadeBridge
+bootstrapper: com.darkspirit69.jadebridge.JadeBridgeBootstrap

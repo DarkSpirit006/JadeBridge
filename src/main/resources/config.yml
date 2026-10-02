@@ -1,0 +1,31 @@
+# JadeBridge configuration
+#
+# The plugin only talks to players that completed a Jade handshake. Players
+# without the Jade mod are never touched.
+
+enabled: true
+
+# Verbose request/handshake logging in the server console.
+debug: false
+
+# Per-player request limits, in requests per second. The Jade client asks for
+# data at most a few times per second while you look around, so the defaults
+# leave plenty of headroom.
+rate-limit:
+  block-requests: 20
+  entity-requests: 20
+
+# Slack added to the player's interaction range when validating request
+# positions, in blocks. Jade's own server exposes this as the
+# jade:max_position_deviation gamerule, which Paper plugins cannot register
+# (the game rule registry is frozen before plugins load), so it lives here.
+max-position-deviation: 21
+
+# Server-side overrides for the client's plugin config, synced during the
+# Jade handshake. Keys are Jade config ids, values are booleans, numbers or
+# strings, for example:
+#
+# config-overrides:
+#   minecraft:entity_health: true
+#   minecraft:potion_effects.limit: 4
+config-overrides: {}
