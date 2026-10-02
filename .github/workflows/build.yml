@@ -4,12 +4,20 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PRs build the exact HEAD commit, not the merge preview
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: actions/setup-java@v4
         with:
@@ -21,7 +29,11 @@ jobs:
       - name: Build
         run: ./gradlew build
 
+      - uses: ./.github/actions/find-jar
+        id: jar
+
       - uses: actions/upload-artifact@v4
         with:
-          name: JadeBridge
-          path: build/libs/*.jar
+          name: plugin-jar
+          path: ${{ steps.jar.outputs.path }}
+          if-no-files-found: error

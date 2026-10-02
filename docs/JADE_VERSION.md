@@ -20,8 +20,8 @@ JadeBridge implements the server half of Jade for the Minecraft 26.3 line.
 - Every server-side data provider (`StreamServerDataProvider` /
   `IServerDataProvider` implementations under `addon/`) was diffed individually;
   the outcome is recorded in [JADE_FEATURE_MATRIX.md](JADE_FEATURE_MATRIX.md).
-- JadeBridge 1.1.0 was compiled against the real mojang-mapped Paper 26.3
-  server jar and smoke-tested live on a Paper 26.3-142 server.
+- JadeBridge is compiled against the real mojang-mapped Paper 26.3
+  server jar and was smoke-tested live on a Paper 26.3-142 server.
 
 ## What changed in Jade 26.3 (server-relevant)
 
@@ -51,24 +51,22 @@ JadeBridge implements the server half of Jade for the Minecraft 26.3 line.
 ## Compatibility
 
 - Jade 26.3.x clients on Paper 26.3: fully supported.
-- The wire protocol is identical to 26.2, so JadeBridge 1.0.x (built for Paper
-  26.2) keeps working for 26.2 servers; 1.1.0 raises `api-version` to 26.3 and
-  matches Jade's 26.3 provider set.
+- The wire protocol is identical to 26.2, so supporting 26.2 servers as well is
+  only a matter of building against the 26.2 line; no protocol handling differs.
 
-## JadeBridge 1.1.1
+## Register/handshake ordering
 
-1.1.0 answered `jade:client_handshake` immediately. That works whenever the
-client's `minecraft:register` — sent right after the vanilla join — reaches the
-server first, but a real Jade client can get its handshake in before the
-register does. Bukkit silently drops plugin messages to channels the receiving
-player has not registered, and Jade never retries its handshake, so the session
-was opened server-side while the client never received the config, shearable
-blocks or provider ids: the mod connected fine, but showed none of the
-server-provided data.
+The Jade client can get its `jade:client_handshake` to the server before its
+`minecraft:register` — sent right after the vanilla join — does. Bukkit
+silently drops plugin messages to channels the receiving player has not
+registered, and Jade never retries its handshake, so an eager reply would be
+lost: the session would open server-side while the client never received the
+config, shearable blocks or provider ids, and none of the server-provided data
+would show up.
 
-1.1.1 sends the reply immediately when the channel is already registered, holds
-it until registration otherwise, and drops held replies on disconnect. Verified
-with a protocol-level bot client that performs a full vanilla join and speaks
-the Jade channels: the failing handshake-before-register order, the
-register-first order, and block/entity request round trips all pass. The
-ordering rule is documented in [JADE_PROTOCOL.md](JADE_PROTOCOL.md).
+JadeBridge therefore sends the reply immediately when the channel is already
+registered, holds it until registration otherwise, and drops held replies on
+disconnect. Verified with a protocol-level bot client that performs a full
+vanilla join and speaks the Jade channels: handshake-before-register,
+register-first, and block/entity request round trips all pass. The ordering
+rule is documented in [JADE_PROTOCOL.md](JADE_PROTOCOL.md).

@@ -1,0 +1,161 @@
+name: Preview
+
+# The unprivileged Build workflow builds every PR and uploads its JAR. This
+# workflow is the privileged half: it takes a finished Build run and, only for
+# PRs labeled "PR: Needs Testing", publishes that JAR as a pre-release and
+# comments on the PR. It never checks out or executes pull request code, so
+# the write token is never exposed to untrusted sources.
+on:
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-${{ github.event.workflow_run.head_branch || github.event.pull_request.head.ref || 'pr' }}
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'pull_request_target' &&
+        github.event.label.name == 'PR: Needs Testing')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Resolve pull request and build
+        id: ctx
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BUILD_RUN: ${{ toJSON(github.event.workflow_run) }}
+          PR_NUMBER_EVENT: ${{ github.event.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            run_id=$(jq -r '.id' <<< "$BUILD_RUN")
+            head_sha=$(jq -r '.head_sha' <<< "$BUILD_RUN")
+            pr_number=$(jq -r '.pull_requests[0].number // empty' <<< "$BUILD_RUN")
+            if [ -z "$pr_number" ]; then
+              pr_number=$(gh api "repos/$REPO/commits/$head_sha/pulls" \
+                --jq '[.[] | select(.state == "open")][0].number // empty')
+            fi
+          else
+            pr_number=$PR_NUMBER_EVENT
+            head_sha=$PR_HEAD_SHA
+            run_id=$(gh run list --repo "$REPO" --workflow Build --event pull_request \
+              --json databaseId,headSha,conclusion --limit 50 \
+              | jq -r --arg sha "$head_sha" \
+                '[.[] | select(.headSha == $sha and .conclusion == "success")][0].databaseId // empty')
+          fi
+
+          if [ -z "${pr_number:-}" ] || [ -z "${run_id:-}" ]; then
+            echo "No successful pull request build to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! gh api "repos/$REPO/pulls/$pr_number" --jq '.labels[].name' \
+            | grep -qx 'PR: Needs Testing'; then
+            echo "Label 'PR: Needs Testing' is not set, nothing to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "publish=true"
+            echo "pr_number=$pr_number"
+            echo "head_sha=$head_sha"
+            echo "run_id=$run_id"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish preview release
+        if: steps.ctx.outputs.publish == 'true'
+        env:
+          PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.ctx.outputs.head_sha }}
+          RUN_ID: ${{ steps.ctx.outputs.run_id }}
+        run: |
+          set -eu
+          preview_version="pr.$PR_NUMBER"
+          tag="preview-pr-$PR_NUMBER"
+          asset="JadeBridge-$preview_version.jar"
+
+          gh run download "$RUN_ID" --repo "$REPO" --name plugin-jar --dir dist
+          mv "$(find dist -type f -name '*.jar' -print -quit)" "dist/$asset"
+
+          notes=$(cat <<EOF
+          Automated preview build of pull request #$PR_NUMBER.
+
+          - Preview version: \`$preview_version\`
+          - Commit: \`$HEAD_SHA\`
+          - Built by: https://github.com/$REPO/actions/runs/$RUN_ID
+
+          This is a pre-release for testing and not a stable release.
+          EOF
+          )
+
+          # One release per PR: replace it so the tag, notes and asset always
+          # match the latest previewed commit.
+          if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+            gh release delete "$tag" --repo "$REPO" --yes --cleanup-tag
+          fi
+          gh release create "$tag" "dist/$asset" --repo "$REPO" \
+            --prerelease --target "$HEAD_SHA" \
+            --title "JadeBridge Preview $preview_version (PR #$PR_NUMBER)" \
+            --notes "$notes"
+
+      - name: Update PR comment
+        if: steps.ctx.outputs.publish == 'true'
+        env:
+          PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.ctx.outputs.head_sha }}
+        run: |
+          set -eu
+          preview_version="pr.$PR_NUMBER"
+          tag="preview-pr-$PR_NUMBER"
+          asset="JadeBridge-$preview_version.jar"
+
+          body=$(cat <<'EOF'
+          ## JadeBridge Preview
+
+          | | |
+          | --- | --- |
+          | Preview version | `%PREVIEW_VERSION%` |
+          | Build status | **Passing** |
+          | Commit | `%HEAD_SHA%` |
+          | Download | [%ASSET%](%DOWNLOAD_URL%) |
+          | Release | [%TAG%](%RELEASE_URL%) |
+
+          This is a pre-release build for testing, not a stable release.
+
+          <!-- jadebridge-preview -->
+          EOF
+          )
+          body=${body//%PREVIEW_VERSION%/$preview_version}
+          body=${body//%HEAD_SHA%/$HEAD_SHA}
+          body=${body//%ASSET%/$asset}
+          body=${body//%DOWNLOAD_URL%/https://github.com/$REPO/releases/download/$tag/$asset}
+          body=${body//%TAG%/$tag}
+          body=${body//%RELEASE_URL%/https://github.com/$REPO/releases/tag/$tag}
+
+          comment_id=$(gh api --paginate "repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq '.[] | select(.body | contains("jadebridge-preview")) | .id' | head -n1)
+          if [ -n "$comment_id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$comment_id" -f body="$body" >/dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+          fi

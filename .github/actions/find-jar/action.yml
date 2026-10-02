@@ -1,0 +1,22 @@
+name: Find plugin JAR
+description: Locates the distributable plugin JAR produced by the Gradle build.
+
+outputs:
+  path:
+    description: Path to the plugin JAR inside build/libs.
+    value: ${{ steps.find.outputs.jar }}
+
+runs:
+  using: composite
+  steps:
+    - id: find
+      shell: bash
+      run: |
+        jar=$(find build/libs -maxdepth 1 -type f -name '*.jar' \
+          ! -name '*-sources.jar' ! -name '*-javadoc.jar' -print -quit)
+        if [ -z "$jar" ]; then
+          echo "No plugin JAR found in build/libs" >&2
+          exit 1
+        fi
+        echo "jar=$jar" >> "$GITHUB_OUTPUT"
+        echo "Found $jar"
