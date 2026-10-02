@@ -32,7 +32,7 @@ jobs:
       - uses: ./.github/actions/find-jar
         id: jar
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: plugin-jar
           path: ${{ steps.jar.outputs.path }}
