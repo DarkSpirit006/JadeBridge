@@ -1,0 +1,23 @@
+# gradle
+.gradle/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.settings/
+.classpath
+.project
+bin/
+
+# runtime junk
+run/
+logs/
+*.log
+
+# OS and JVM crash files
+.DS_Store
+Thumbs.db
+hs_err_pid*
+replay_pid*

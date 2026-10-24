@@ -1,0 +1,69 @@
+plugins {
+    id 'java'
+    id 'io.papermc.paperweight.userdev' version '2.0.0-beta.24'
+    id 'com.gradleup.shadow' version '9.2.2'
+}
+
+def wrapperGradleVersion = '9.8.2'
+
+group = providers.gradleProperty('group').getOrElse('com.darkspirit69')
+version = providers.gradleProperty('version').getOrElse('1.0.0')
+description = 'Server-side support for the Jade client mod on Paper servers'
+
+tasks.named('wrapper', org.gradle.api.tasks.wrapper.Wrapper) {
+    gradleVersion = wrapperGradleVersion
+    distributionType = org.gradle.api.tasks.wrapper.Wrapper.DistributionType.BIN
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    paperweight.paperDevBundle('26.3.build.142-beta')
+
+    implementation 'org.bstats:bstats-bukkit:3.2.1'
+
+    testImplementation platform('org.junit:junit-bom:6.1.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('jar') {
+    enabled = false
+}
+
+tasks.named('shadowJar') {
+    archiveClassifier = ''
+    relocate 'org.bstats', 'com.darkspirit69.jadebridge.lib.bstats'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 25
+}
+
+javadoc {
+    options.encoding = 'UTF-8'
+}
+
+processResources {
+    def props = [version: project.version]
+    inputs.properties props
+    filteringCharset 'UTF-8'
+    filesMatching('paper-plugin.yml') {
+        expand props
+    }
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    testLogging {
+        events 'failed', 'skipped'
+        exceptionFormat 'full'
+    }
+}

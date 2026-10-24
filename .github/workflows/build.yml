@@ -1,0 +1,48 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # PRs build the exact HEAD commit, not the merge preview
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: gradle/actions/wrapper-validation@v6
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Build
+        env:
+          BUILD_VERSION: ${{ github.event_name == 'pull_request' && format('pr.{0}', github.event.pull_request.number) || '' }}
+        run: |
+          if [ -n "$BUILD_VERSION" ]; then
+            bash ./gradlew build "-Pversion=$BUILD_VERSION"
+          else
+            bash ./gradlew build
+          fi
+
+      - uses: ./.github/actions/find-jar
+        id: jar
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: plugin-jar
+          path: ${{ steps.jar.outputs.path }}
+          if-no-files-found: error

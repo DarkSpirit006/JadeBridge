@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: gradle/actions/wrapper-validation@v6
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Read Gradle version and validate release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version=$(bash ./gradlew -q properties --property version | sed -n 's/^version: //p')
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Gradle project version must have the form X.Y.Z; found '$version'." >&2
+            exit 1
+          fi
+
+          tag="v$version"
+          if gh release view "$tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            echo "A release for $tag already exists." >&2
+            exit 1
+          fi
+          if gh api "repos/$REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "Git tag $tag already exists." >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: bash ./gradlew clean build "-Pversion=$VERSION"
+
+      - uses: ./.github/actions/find-jar
+        id: jar
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ steps.release.outputs.tag }}
+          JAR_PATH: ${{ steps.jar.outputs.path }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          gh release create "$TAG" "$JAR_PATH" \
+            --repo "$REPOSITORY" \
+            --target "$TARGET_SHA" \
+            --title "JadeBridge ${TAG#v}" \
+            --generate-notes
